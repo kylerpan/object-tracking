@@ -50,9 +50,6 @@ class Tracker:
 
         im_patch = np.full((original_sz, original_sz, k), avg_chans, dtype=np.ubyte)
         im_patch[top_pad:top_pad + context_ymax - context_ymin, left_pad:left_pad + context_xmax - context_xmin, :] = frame[context_ymin:context_ymax, context_xmin:context_xmax, :]
-
-        # cv.imshow('patch', im_patch)
-        # cv.waitKey(1)
         
         if not np.array_equal(model_sz, original_sz):
             im_patch = cv.resize(im_patch, (model_sz, model_sz))
