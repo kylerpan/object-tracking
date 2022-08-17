@@ -31,6 +31,7 @@ class Tracker:
         r, c, k = frame.shape
         temp = original_sz / 2
 
+        # finding area of interest
         context_xmin = int(center[0] - temp)
         context_xmax = context_xmin + original_sz
         context_ymin = int(center[1] - temp)
@@ -48,9 +49,11 @@ class Tracker:
         if (context_xmax > c - 1): context_xmax = c - 1
         if (context_ymax > r - 1): context_ymax = r - 1
 
+        # getting data for area of interest
         im_patch = np.full((original_sz, original_sz, k), avg_chans, dtype=np.ubyte)
         im_patch[top_pad:top_pad + context_ymax - context_ymin, left_pad:left_pad + context_xmax - context_xmin, :] = frame[context_ymin:context_ymax, context_xmin:context_xmax, :]
         
+        # resizing image patch
         if not np.array_equal(model_sz, original_sz):
             im_patch = cv.resize(im_patch, (model_sz, model_sz))
         im_patch = im_patch.transpose(2, 0, 1)
@@ -83,29 +86,33 @@ class Tracker:
         self.frame_output_tensors = self.frame_session.run(self.frame_outputs, onnx_inputs)
 
     def postprocessFrame(self, prev_roi, frame):
+        # reshaping score to be in correct dimension
         score = np.reshape(np.transpose(np.reshape(self.frame_output_tensors[0], (2, 5, 25, 25)), (1, 2, 3, 0)), (3125, 2))
         score -= np.amax(score)
         self.score = np.exp(score[:, 1]) / np.sum(score[:, 0]) + np.exp(score[:, 1])
 
+        # reshaping prediction bounding box to be in correct dimension and apply weights
         self.pred_bbox = np.reshape(np.transpose(np.reshape(self.frame_output_tensors[1], (4, 5, 25, 25)), (1, 2, 3, 0)), (3125, 4))
         self.pred_bbox[:, 0] = self.pred_bbox[:, 0] * self.anchors[:, 2] + self.anchors[:, 0]
         self.pred_bbox[:, 1] = self.pred_bbox[:, 1] * self.anchors[:, 3] + self.anchors[:, 1]
         self.pred_bbox[:, 2] = np.exp(self.pred_bbox[:, 2]) * self.anchors[:, 2]
         self.pred_bbox[:, 3] = np.exp(self.pred_bbox[:, 3]) * self.anchors[:, 3]
 
-        # aspect ratio
+        # aspect ratio weights
         ratio0 = prev_roi.w / prev_roi.h
         ratio1 = self.pred_bbox[:, 2] / self.pred_bbox[:, 3]
         r_c = np.maximum(ratio0/ratio1, ratio1/ratio0)
 
-        # scale ratio
+        # scale ratio weights
         scale0 = (prev_roi.w + prev_roi.h) / 2
         scale1 = (self.pred_bbox[:, 2] + self.pred_bbox[:, 3]) / 2
         s_c = np.maximum(scale0/scale1, scale1/scale0)
 
+        # applying weights
         wts = np.exp(-(r_c * s_c - 1) * 0.05)
         self.score = self.score * wts
 
+        # finding best bounding box
         best_idx = np.argmax(self.score)
         bbox = self.pred_bbox[best_idx, :]
         bbox /= self.scale
@@ -115,6 +122,7 @@ class Tracker:
         x1 = x0 + bbox[2]
         y1 = y0 + bbox[3]
 
+        # clipping to fit the frame
         r, c, k = frame.shape
         x0 = max(0, min(x0, c))
         y0 = max(0, min(y0, r))
